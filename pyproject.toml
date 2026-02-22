@@ -1,0 +1,34 @@
+[project]
+name = "DomiChess2"
+dynamic = ["version"]
+description = "A simple and elegant chess application for your desktop. Play against a friend, challenge a computer opponent, and customize the look and feel of your game to your liking."
+authors = [
+    { name = "devfred78", email = "devfred78@gmail.com" },
+]
+readme = "README.md"
+requires-python = ">=3.14"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: Windows",
+]
+license = "MIT"
+dependencies = [
+    "chess",
+    "Pillow",
+    "svglib",
+    "reportlab",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/yourusername/DomiChess"
+
+[project.scripts]
+domichess = "domichess.main:main"
+
+[project.optional-dependencies]
+dev = [
+    "pyinstaller",
+]
+
+[tool.setuptools.dynamic]
+version = {attr = "domichess.__version__"}

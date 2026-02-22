@@ -1,0 +1,1 @@
+uv run pyinstaller --noconfirm --clean --workpath=%TEMP%/DomiChess2 build.spec
