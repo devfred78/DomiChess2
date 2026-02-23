@@ -1,7 +1,0 @@
-chess
-Pillow
-svglib
-reportlab
-
-[dev]
-pyinstaller
