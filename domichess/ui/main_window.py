@@ -34,26 +34,12 @@ class MainWindow(tk.Tk):
     def __init__(self):
         super().__init__()
         
-        print("--- Initializing DomiChess2 ---")
         self.game = Game()
-        self.engine_paths = self.load_engine_paths()
-        self.board_themes = self._load_themes_from("boards", "Board")
-        self.piece_themes = self._load_themes_from("pieces", "Piece")
         self.active_engines = {}
         self.game_running = False
         self._theme_update_lock = False
         self.current_player_photo_image = None
         self.blank_image = tk.PhotoImage(width=64, height=64)
-
-        self.help_engine_name = None
-        if self.engine_paths:
-            engine_names = self.engine_paths.keys()
-            self.help_engine_name = next((name for name in engine_names if "madchess" in name.lower()), None)
-            if not self.help_engine_name:
-                self.help_engine_name = random.choice(list(engine_names))
-        
-        self.set_title_and_icon()
-        print("-----------------------------")
 
         # --- Layout ---
         self.top_theme_bar = tk.LabelFrame(self, text="Themes", labelanchor="nw", padx=10, pady=5)
@@ -63,14 +49,6 @@ class MainWindow(tk.Tk):
         self.left_panel = tk.Frame(self.main_content_frame)
         self.left_panel.pack(side=tk.LEFT, fill="y", padx=(0, 10))
         
-        cburnett_theme_name = "John Pablok Cburnett set (with shadow)"
-        startup_board_theme = self._get_first_non_default(self.board_themes) or "Default"
-        startup_piece_theme = cburnett_theme_name if cburnett_theme_name in self.piece_themes else (self._get_first_non_default(self.piece_themes) or "Default")
-        
-        self._last_board_theme = startup_board_theme
-        self._last_piece_theme = startup_piece_theme
-        self._create_theme_selectors(self.top_theme_bar, startup_board_theme, startup_piece_theme)
-
         # --- Current Player Display ---
         self.current_player_frame = tk.LabelFrame(self.left_panel, text="Current Player")
         self.current_player_frame.pack(side=tk.TOP, pady=(0, 10), fill="x")
@@ -81,9 +59,10 @@ class MainWindow(tk.Tk):
         self.white_display_piece = chess.Piece(random.choice([chess.KNIGHT, chess.QUEEN, chess.ROOK, chess.BISHOP]), chess.WHITE)
         self.black_display_piece = chess.Piece(random.choice([chess.KNIGHT, chess.QUEEN, chess.ROOK, chess.BISHOP]), chess.BLACK)
         
-        self.white_player_panel = PlayerPanel(self.left_panel, "White", self.engine_paths, self.white_display_piece)
+        # Defer engine path loading until after log is created
+        self.white_player_panel = PlayerPanel(self.left_panel, "White", {}, self.white_display_piece)
         self.white_player_panel.pack(side=tk.TOP, fill="x", pady=5)
-        self.black_player_panel = PlayerPanel(self.left_panel, "Black", self.engine_paths, self.black_display_piece)
+        self.black_player_panel = PlayerPanel(self.left_panel, "Black", {}, self.black_display_piece)
         self.black_player_panel.pack(side=tk.TOP, fill="x", pady=5)
         self.white_player_panel.set_callback(self.on_player_change)
         self.black_player_panel.set_callback(self.on_player_change)
@@ -95,12 +74,53 @@ class MainWindow(tk.Tk):
         self.start_button = tk.Button(controls_frame, text="Start Game", command=self.start_game, background="green", foreground="white")
         self.start_button.pack(side=tk.LEFT, padx=2)
         
-        if self.engine_paths:
-            self.help_button = tk.Button(controls_frame, text="Help", command=self.on_help_request, background="orange", foreground="black")
-            self.help_button.pack(side=tk.LEFT, padx=2)
+        self.help_button = tk.Button(controls_frame, text="Help", command=self.on_help_request, background="orange", foreground="black")
+        self.help_button.pack(side=tk.LEFT, padx=2)
         
         self.new_game_button = tk.Button(controls_frame, text="New Game", command=self.confirm_new_game, background="red", foreground="white")
         self.new_game_button.pack(side=tk.LEFT, padx=2)
+
+        # --- Log Area ---
+        log_frame = tk.LabelFrame(self.left_panel, text="Game Log")
+        log_frame.pack(side=tk.TOP, fill="x", pady=(10, 0))
+
+        self.log_text = tk.Text(log_frame, height=10, wrap="word", state="disabled", font=("Consolas", 9))
+        scrollbar = tk.Scrollbar(log_frame, command=self.log_text.yview)
+        self.log_text.config(yscrollcommand=scrollbar.set)
+
+        scrollbar.pack(side=tk.RIGHT, fill="y")
+        self.log_text.pack(side=tk.LEFT, fill="both", expand=True)
+        
+        self.log_message("Welcome to DomiChess2!")
+
+        # --- Load Resources ---
+        self.engine_paths = self.load_engine_paths()
+        self.board_themes = self._load_themes_from("boards", "Board")
+        self.piece_themes = self._load_themes_from("pieces", "Piece")
+        
+        # Update player panels with loaded engines
+        self.white_player_panel.update_engine_list(self.engine_paths)
+        self.black_player_panel.update_engine_list(self.engine_paths)
+        if not self.engine_paths:
+            self.help_button.pack_forget()
+
+        self.help_engine_name = None
+        if self.engine_paths:
+            engine_names = self.engine_paths.keys()
+            self.help_engine_name = next((name for name in engine_names if "madchess" in name.lower()), None)
+            if not self.help_engine_name:
+                self.help_engine_name = random.choice(list(engine_names))
+            self.log_message(f"Help engine: {self.help_engine_name}")
+
+        self.set_title_and_icon()
+        
+        cburnett_theme_name = "John Pablok Cburnett set (with shadow)"
+        startup_board_theme = self._get_first_non_default(self.board_themes) or "Default"
+        startup_piece_theme = cburnett_theme_name if cburnett_theme_name in self.piece_themes else (self._get_first_non_default(self.piece_themes) or "Default")
+        
+        self._last_board_theme = startup_board_theme
+        self._last_piece_theme = startup_piece_theme
+        self._create_theme_selectors(self.top_theme_bar, startup_board_theme, startup_piece_theme)
 
         self.board = Board(self.main_content_frame, self.game, self.on_human_move)
         self.board.pack(side=tk.LEFT, fill="both", expand=True)
@@ -116,6 +136,14 @@ class MainWindow(tk.Tk):
         self.geometry(f"{width}x{height}")
         self.minsize(width, height)
 
+    def log_message(self, message, clear=False):
+        self.log_text.config(state="normal")
+        if clear:
+            self.log_text.delete("1.0", tk.END)
+        self.log_text.insert(tk.END, f"{message}\n")
+        self.log_text.config(state="disabled")
+        self.log_text.see(tk.END)
+
     def set_title_and_icon(self):
         name = "DomiChess2"
         version = ""
@@ -127,15 +155,13 @@ class MainWindow(tk.Tk):
             version = domichess.__version__
         
         title = f"{name} {version}"
-        if self.help_engine_name:
-            title += f" (powered by {self.help_engine_name})"
         self.title(title)
 
         icon_path = ICONS_DIR / "chess_64px.ico"
         if icon_path.is_file():
             try: self.iconbitmap(icon_path)
-            except: print(f"Could not load icon from {icon_path}.")
-        else: print(f"Icon file not found at {icon_path}")
+            except: self.log_message(f"Warning: Could not load icon.")
+        else: self.log_message(f"Warning: Icon file not found.")
 
     def _update_current_player_display(self):
         if not self.game_running:
@@ -207,6 +233,8 @@ class MainWindow(tk.Tk):
     def game_loop(self):
         if not self.game_running or self.game.is_game_over():
             if self.game.is_game_over():
+                result = self.game.get_game_result()
+                self.log_message(f"Game over: {result}")
                 self.board.show_game_over_message()
                 self.reset_ui_to_setup()
             return
@@ -232,12 +260,24 @@ class MainWindow(tk.Tk):
                 result = engine_info["process"].play(self.game.get_board(), chess.engine.Limit(time=engine_info["time"]))
                 def apply_move():
                     if self.game_running:
-                        self.game.move(result.move.uci())
+                        move = result.move
+                        san = self.game.get_board().san(move)
+                        
+                        move_num_str = ""
+                        if self.game.get_board().turn == chess.WHITE:
+                            move_num_str = f"{self.game.get_board().fullmove_number}."
+                        
+                        self.game.move(move.uci()) # Push the move
+                        
+                        if self.game.get_board().turn == chess.WHITE: # Black just moved
+                             move_num_str = f"{self.game.get_board().fullmove_number - 1}. ..."
+
+                        self.log_message(f"{move_num_str} {san}")
                         self.board.redraw_all()
                     setattr(self, f'_engine_move_in_progress_{color}', False)
                 self.after(0, apply_move)
             except Exception as e:
-                print(f"Engine error for {color}: {e}"); setattr(self, f'_engine_move_in_progress_{color}', False)
+                self.log_message(f"Engine error for {color}: {e}"); setattr(self, f'_engine_move_in_progress_{color}', False)
         threading.Thread(target=think_and_move, daemon=True).start()
 
     def on_player_change(self, event=None):
@@ -245,10 +285,25 @@ class MainWindow(tk.Tk):
             if messagebox.askyesno("Restart Game", "Changing player type requires a new game. Restart?"):
                 self.reset_ui_to_setup()
 
-    def on_human_move(self, move):
+    def on_human_move(self, move_uci):
         if self.game_running:
-            self.game.move(move)
-            self.board.redraw_all()
+            try:
+                move = chess.Move.from_uci(move_uci)
+                san = self.game.get_board().san(move)
+                
+                move_num_str = ""
+                if self.game.get_board().turn == chess.WHITE:
+                    move_num_str = f"{self.game.get_board().fullmove_number}."
+
+                if self.game.move(move_uci):
+                    if self.game.get_board().turn == chess.WHITE: # Black just moved
+                        move_num_str = f"{self.game.get_board().fullmove_number - 1}. ..."
+
+                    self.log_message(f"{move_num_str} {san}")
+                    self.board.redraw_all()
+            except Exception as e:
+                self.log_message(f"Error on move: {e}")
+
 
     def _get_first_non_default(self, themes_dict):
         for name in themes_dict.keys():
@@ -268,46 +323,38 @@ class MainWindow(tk.Tk):
                     else: readme_text = textwrap.dedent("""...""").strip()
                     readme_path.write_text(readme_text, encoding="utf-8")
                 except Exception as e:
-                    print(f"  Warning: Could not create user {resource_type} directory or helper file: {e}")
+                    self.log_message(f"Warning: Could not create user {resource_type} directory.")
 
     def _load_themes_from(self, sub_dir, theme_type):
         self._create_user_dir_if_needed(APP_ROOT / "themes", sub_dir, theme_type)
         themes = {"Default": Theme("Default")}
-        print(f"--- Searching for {theme_type} themes ---")
+        self.log_message(f"Searching for {theme_type} themes...")
         for base_path in THEME_SEARCH_PATHS:
             path = base_path / sub_dir
             if path.is_dir():
-                print(f"Searching in: {path}")
                 for theme_dir in path.iterdir():
                     if theme_dir.is_dir():
                         name_file = theme_dir / "name.txt"; theme_name = theme_dir.name
                         if name_file.is_file():
                             try: theme_name = name_file.read_text(encoding="utf-8").strip()
-                            except Exception as e: print(f"Could not read theme name from {name_file}: {e}")
+                            except Exception as e: self.log_message(f"Warning: Could not read {name_file}")
                         if theme_name not in themes:
-                            print(f"  Found theme: '{theme_name}'"); themes[theme_name] = Theme(theme_name, theme_dir)
-                        else:
-                            print(f"  Skipping duplicate theme: '{theme_name}'")
-        print(f"Detected {theme_type} themes: {list(themes.keys())}")
+                            self.log_message(f"- Found: '{theme_name}'"); themes[theme_name] = Theme(theme_name, theme_dir)
         return themes
 
     def load_engine_paths(self):
         self._create_user_dir_if_needed(APP_ROOT, "engines", "engines")
         engines = {}
-        print("--- Searching for engines ---")
+        self.log_message("Searching for engines...")
         for path in ENGINE_SEARCH_PATHS:
             if path.is_dir():
-                print(f"Searching in: {path}")
                 for exe_path in path.rglob("*.exe"):
                     try:
                         engine = chess.engine.SimpleEngine.popen_uci(str(exe_path)); engine_name = engine.id['name']; engine.quit()
                         if engine_name not in engines:
-                            print(f"  Found engine: {engine_name} (from {exe_path.name})"); engines[engine_name] = str(exe_path)
-                        else:
-                            print(f"  Skipping duplicate engine: {engine_name}")
-                    except Exception as e:
-                        print(f"  Could not load engine {exe_path.name}: {e}")
-        print(f"Detected engines: {list(engines.keys())}")
+                            self.log_message(f"- Found: {engine_name}"); engines[engine_name] = str(exe_path)
+                    except Exception:
+                        self.log_message(f"- Failed to load: {exe_path.name}")
         return engines
 
     def _set_interactive_widgets_state(self, parent_widget, state):
@@ -321,12 +368,36 @@ class MainWindow(tk.Tk):
         self.quit_all_engines(); self.game.reset(); self.board.redraw_all(); self.set_ui_state(is_game_running=False)
 
     def start_game(self):
-        white_config = self.white_player_panel.get_player_config(); black_config = self.black_player_panel.get_player_config()
-        self.set_ui_state(is_game_running=True); self.quit_all_engines(); self.game.reset()
+        self.log_message("--- New Game Started ---", clear=True)
+        white_config = self.white_player_panel.get_player_config()
+        black_config = self.black_player_panel.get_player_config()
+
+        def get_player_description(config):
+            if config['type'] == 'human':
+                return f"Human ({config['name']})"
+            elif config['type'] == 'cpu':
+                desc = f"CPU ({config['engine']}"
+                if 'elo' in config:
+                    desc += f" @ {config['elo']} Elo"
+                desc += ")"
+                return desc
+            return "Unknown"
+
+        self.log_message(f"White: {get_player_description(white_config)}")
+        self.log_message(f"Black: {get_player_description(black_config)}")
+        self.log_message("-" * 20)
+
+        self.set_ui_state(is_game_running=True)
+        self.quit_all_engines()
+        self.game.reset()
+        
         self.active_engines["White"] = self._configure_engine(white_config)
         self.active_engines["Black"] = self._configure_engine(black_config)
         self.active_engines = {k: v for k, v in self.active_engines.items() if v}
-        self.board.selected_square = None; self.board.redraw_all(); self.after(100, self.game_loop)
+        
+        self.board.selected_square = None
+        self.board.redraw_all()
+        self.after(100, self.game_loop)
 
     def _configure_engine(self, config):
         if config["type"] != "cpu": return None
@@ -334,9 +405,10 @@ class MainWindow(tk.Tk):
             engine_process = chess.engine.SimpleEngine.popen_uci(self.engine_paths[config["engine"]])
             if "elo" in config and "UCI_Elo" in engine_process.options:
                 engine_process.configure({"UCI_LimitStrength": True, "UCI_Elo": config["elo"]})
+            # self.log_message(f"Started engine: {config['engine']}") # Redundant now
             return {"process": engine_process, "time": config["time"]}
         except Exception as e:
-            print(f"Failed to start or configure engine {config['engine']}: {e}"); return None
+            self.log_message(f"Failed to start engine {config['engine']}"); return None
 
     def confirm_new_game(self):
         if messagebox.askyesno("New Game", "Are you sure? This will stop the current game and return to the setup screen."):
@@ -369,10 +441,17 @@ class MainWindow(tk.Tk):
     def on_help_request(self):
         if not self.game_running or not self.help_engine_name: return
         self.help_button.config(state=tk.DISABLED)
+        self.log_message("Requesting help...")
         def get_best_move():
             try:
                 engine = chess.engine.SimpleEngine.popen_uci(self.engine_paths[self.help_engine_name])
                 result = engine.play(self.game.get_board(), chess.engine.Limit(time=0.5)); engine.quit()
-                self.after(0, lambda: (self.board.draw_help_arrow(result.move), self.help_button.config(state=tk.NORMAL)))
-            except Exception as e: print(f"Help engine error: {e}"); self.help_button.config(state=tk.NORMAL)
+                self.after(0, lambda: (
+                    self.log_message(f"Suggested move: {self.game.get_board().san(result.move)}"),
+                    self.board.draw_help_arrow(result.move), 
+                    self.help_button.config(state=tk.NORMAL)
+                ))
+            except Exception as e: 
+                self.log_message(f"Help engine error: {e}")
+                self.after(0, lambda: self.help_button.config(state=tk.NORMAL))
         threading.Thread(target=get_best_move, daemon=True).start()
