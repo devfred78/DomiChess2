@@ -7,6 +7,7 @@ Welcome to DomiChess2, a simple and elegant chess application for your desktop. 
 ## Features
 
 - **Play Your Way**: Enjoy games between two human players or challenge a computer opponent (CPU). You can even watch two CPUs battle it out!
+- **Save Your Games**: Save your completed games in the standard **PGN (Portable Game Notation)** format. A dialog allows you to add metadata like the event name, site, and round, making your saved games compatible with almost any chess software.
 - **Add Your Own Engines**: Easily add any standard (UCI) chess engine. If the engine supports it, you can even adjust its playing strength (Elo) directly from the interface.
 - **Total Visual Customization**:
     - Mix and match separate themes for the board and the pieces.
@@ -15,6 +16,7 @@ Welcome to DomiChess2, a simple and elegant chess application for your desktop. 
     - A clean, resizable interface.
     - A "Current Player" display to always know whose turn it is.
     - A "Help" button that suggests a move, powered by the strongest available engine.
+    - An integrated **Game Log** that shows detected themes and engines at startup, player info, and a complete move history for the current game.
 
 ## Getting Started
 
