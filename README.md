@@ -2,7 +2,7 @@
 
 Welcome to DomiChess2, a simple and elegant chess application for your desktop. Play against a friend, challenge a computer opponent, and customize the look and feel of your game to your liking.
 
-![DomiChess2 Screenshot](Assets/domichess2_v0.1.0_main_screenshot.png)
+![DomiChess2 Screenshot](Assets/domichess2_v0.2.0_main_screenshot.png)
 
 ## Features
 

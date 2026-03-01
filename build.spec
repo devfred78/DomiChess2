@@ -5,22 +5,6 @@ import tomllib
 from domichess import __version__
 
 
-# def domichess_version():
-#	"""
-#	Get the current version of DomiChess from the pyproject.toml file.
-#	"""
-#	pyproject_path = Path(__name__).resolve().parent / Path("pyproject.toml")
-#	if pyproject_path.is_file():
-#		try:
-#			with pyproject_path.open('rb') as pyproject_file:
-#				pyproject_toml = tomllib.load(pyproject_file)
-#			return pyproject_toml['project']['version']
-#		except tomllib.TOMLDecodeError:
-#			return
-#	else:
-#		return
-
-
 def domichess_name():
 	"""
 	Get the name of DomiChess app from the pyproject.toml file.

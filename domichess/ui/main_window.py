@@ -155,6 +155,8 @@ class MainWindow(tk.Tk):
             version = domichess.__version__
         
         title = f"{name} {version}"
+        if self.help_engine_name:
+            title += f" (powered by {self.help_engine_name})"
         self.title(title)
 
         icon_path = ICONS_DIR / "chess_64px.ico"
