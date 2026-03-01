@@ -1,16 +1,17 @@
 # domichess/ui/main_window.py
 
 import tkinter as tk
-from tkinter import ttk
-from tkinter import messagebox
+from tkinter import ttk, filedialog, messagebox
 import chess
 import chess.engine
+import chess.pgn
 from pathlib import Path
 import threading
 import random
 import importlib.metadata
 import sys
 import textwrap
+from datetime import datetime
 import domichess
 
 from domichess.core.game import Game
@@ -40,6 +41,8 @@ class MainWindow(tk.Tk):
         self._theme_update_lock = False
         self.current_player_photo_image = None
         self.blank_image = tk.PhotoImage(width=64, height=64)
+        self.white_player_config = None
+        self.black_player_config = None
 
         # --- Layout ---
         self.top_theme_bar = tk.LabelFrame(self, text="Themes", labelanchor="nw", padx=10, pady=5)
@@ -59,7 +62,6 @@ class MainWindow(tk.Tk):
         self.white_display_piece = chess.Piece(random.choice([chess.KNIGHT, chess.QUEEN, chess.ROOK, chess.BISHOP]), chess.WHITE)
         self.black_display_piece = chess.Piece(random.choice([chess.KNIGHT, chess.QUEEN, chess.ROOK, chess.BISHOP]), chess.BLACK)
         
-        # Defer engine path loading until after log is created
         self.white_player_panel = PlayerPanel(self.left_panel, "White", {}, self.white_display_piece)
         self.white_player_panel.pack(side=tk.TOP, fill="x", pady=5)
         self.black_player_panel = PlayerPanel(self.left_panel, "Black", {}, self.black_display_piece)
@@ -79,6 +81,9 @@ class MainWindow(tk.Tk):
         
         self.new_game_button = tk.Button(controls_frame, text="New Game", command=self.confirm_new_game, background="red", foreground="white")
         self.new_game_button.pack(side=tk.LEFT, padx=2)
+        
+        self.save_pgn_button = tk.Button(controls_frame, text="Save PGN", command=self.prompt_for_pgn_save, background="blue", foreground="white")
+        self.save_pgn_button.pack(side=tk.LEFT, padx=2)
 
         # --- Log Area ---
         log_frame = tk.LabelFrame(self.left_panel, text="Game Log")
@@ -98,7 +103,6 @@ class MainWindow(tk.Tk):
         self.board_themes = self._load_themes_from("boards", "Board")
         self.piece_themes = self._load_themes_from("pieces", "Piece")
         
-        # Update player panels with loaded engines
         self.white_player_panel.update_engine_list(self.engine_paths)
         self.black_player_panel.update_engine_list(self.engine_paths)
         if not self.engine_paths:
@@ -192,6 +196,7 @@ class MainWindow(tk.Tk):
 
         self.start_button.config(state=tk.DISABLED if is_game_running else tk.NORMAL)
         self.new_game_button.config(state=tk.NORMAL if is_game_running else tk.DISABLED)
+        self.save_pgn_button.config(state=tk.NORMAL if is_game_running else tk.DISABLED)
         if hasattr(self, 'help_button'):
             self.help_button.config(state=tk.NORMAL if is_game_running else tk.DISABLED)
         
@@ -238,7 +243,7 @@ class MainWindow(tk.Tk):
                 result = self.game.get_game_result()
                 self.log_message(f"Game over: {result}")
                 self.board.show_game_over_message()
-                self.reset_ui_to_setup()
+                self.set_ui_state(is_game_running=True) # Keep PGN button active
             return
         
         self._update_current_player_display()
@@ -269,9 +274,9 @@ class MainWindow(tk.Tk):
                         if self.game.get_board().turn == chess.WHITE:
                             move_num_str = f"{self.game.get_board().fullmove_number}."
                         
-                        self.game.move(move.uci()) # Push the move
+                        self.game.move(move.uci())
                         
-                        if self.game.get_board().turn == chess.WHITE: # Black just moved
+                        if self.game.get_board().turn == chess.WHITE:
                              move_num_str = f"{self.game.get_board().fullmove_number - 1}. ..."
 
                         self.log_message(f"{move_num_str} {san}")
@@ -298,14 +303,13 @@ class MainWindow(tk.Tk):
                     move_num_str = f"{self.game.get_board().fullmove_number}."
 
                 if self.game.move(move_uci):
-                    if self.game.get_board().turn == chess.WHITE: # Black just moved
+                    if self.game.get_board().turn == chess.WHITE:
                         move_num_str = f"{self.game.get_board().fullmove_number - 1}. ..."
 
                     self.log_message(f"{move_num_str} {san}")
                     self.board.redraw_all()
             except Exception as e:
                 self.log_message(f"Error on move: {e}")
-
 
     def _get_first_non_default(self, themes_dict):
         for name in themes_dict.keys():
@@ -319,11 +323,6 @@ class MainWindow(tk.Tk):
             if not user_dir.is_dir():
                 try:
                     user_dir.mkdir(parents=True, exist_ok=True)
-                    readme_path = user_dir / f"PUT_YOUR_{resource_type.upper()}_HERE.txt"
-                    if resource_type == "Board": readme_text = textwrap.dedent("""...""").strip()
-                    elif resource_type == "Piece": readme_text = textwrap.dedent("""...""").strip()
-                    else: readme_text = textwrap.dedent("""...""").strip()
-                    readme_path.write_text(readme_text, encoding="utf-8")
                 except Exception as e:
                     self.log_message(f"Warning: Could not create user {resource_type} directory.")
 
@@ -367,34 +366,39 @@ class MainWindow(tk.Tk):
             self._set_interactive_widgets_state(child, state)
 
     def reset_ui_to_setup(self):
-        self.quit_all_engines(); self.game.reset(); self.board.redraw_all(); self.set_ui_state(is_game_running=False)
+        self.quit_all_engines()
+        self.game.reset()
+        self.board.redraw_all()
+        self.set_ui_state(is_game_running=False)
+        self.white_player_config = None
+        self.black_player_config = None
 
     def start_game(self):
         self.log_message("--- New Game Started ---", clear=True)
-        white_config = self.white_player_panel.get_player_config()
-        black_config = self.black_player_panel.get_player_config()
+        self.white_player_config = self.white_player_panel.get_player_config()
+        self.black_player_config = self.black_player_panel.get_player_config()
 
         def get_player_description(config):
             if config['type'] == 'human':
                 return f"Human ({config['name']})"
             elif config['type'] == 'cpu':
-                desc = f"CPU ({config['engine']}"
+                desc = f"CPU ({config.get('engine', 'N/A')}"
                 if 'elo' in config:
                     desc += f" @ {config['elo']} Elo"
                 desc += ")"
                 return desc
             return "Unknown"
 
-        self.log_message(f"White: {get_player_description(white_config)}")
-        self.log_message(f"Black: {get_player_description(black_config)}")
+        self.log_message(f"White: {get_player_description(self.white_player_config)}")
+        self.log_message(f"Black: {get_player_description(self.black_player_config)}")
         self.log_message("-" * 20)
 
         self.set_ui_state(is_game_running=True)
         self.quit_all_engines()
         self.game.reset()
         
-        self.active_engines["White"] = self._configure_engine(white_config)
-        self.active_engines["Black"] = self._configure_engine(black_config)
+        self.active_engines["White"] = self._configure_engine(self.white_player_config)
+        self.active_engines["Black"] = self._configure_engine(self.black_player_config)
         self.active_engines = {k: v for k, v in self.active_engines.items() if v}
         
         self.board.selected_square = None
@@ -407,7 +411,6 @@ class MainWindow(tk.Tk):
             engine_process = chess.engine.SimpleEngine.popen_uci(self.engine_paths[config["engine"]])
             if "elo" in config and "UCI_Elo" in engine_process.options:
                 engine_process.configure({"UCI_LimitStrength": True, "UCI_Elo": config["elo"]})
-            # self.log_message(f"Started engine: {config['engine']}") # Redundant now
             return {"process": engine_process, "time": config["time"]}
         except Exception as e:
             self.log_message(f"Failed to start engine {config['engine']}"); return None
@@ -457,3 +460,74 @@ class MainWindow(tk.Tk):
                 self.log_message(f"Help engine error: {e}")
                 self.after(0, lambda: self.help_button.config(state=tk.NORMAL))
         threading.Thread(target=get_best_move, daemon=True).start()
+
+    def prompt_for_pgn_save(self):
+        dialog = tk.Toplevel(self)
+        dialog.title("PGN Metadata")
+        
+        fields = {"Event": "Casual Game", "Site": "Local", "Round": ""}
+        entries = {}
+
+        for i, (field, default) in enumerate(fields.items()):
+            tk.Label(dialog, text=f"{field}:").grid(row=i, column=0, padx=5, pady=5, sticky="w")
+            entry = tk.Entry(dialog, width=40)
+            entry.insert(0, default)
+            entry.grid(row=i, column=1, padx=5, pady=5)
+            entries[field] = entry
+
+        def on_ok():
+            metadata = {field: entry.get() for field, entry in entries.items()}
+            dialog.destroy()
+            self._save_pgn(metadata)
+
+        ok_button = tk.Button(dialog, text="OK", command=on_ok)
+        ok_button.grid(row=len(fields), column=0, columnspan=2, pady=10)
+        
+        dialog.transient(self)
+        dialog.grab_set()
+        self.wait_window(dialog)
+
+    def _save_pgn(self, metadata):
+        filepath = filedialog.asksaveasfilename(
+            defaultextension=".pgn",
+            filetypes=[("PGN files", "*.pgn"), ("All files", "*.*")]
+        )
+        if not filepath:
+            return
+
+        pgn_game = chess.pgn.Game()
+        
+        # Set headers
+        pgn_game.headers["Event"] = metadata.get("Event") or "?"
+        pgn_game.headers["Site"] = metadata.get("Site") or "?"
+        pgn_game.headers["Round"] = metadata.get("Round") or "?"
+        pgn_game.headers["Date"] = datetime.now().strftime("%Y.%m.%d")
+        
+        if self.white_player_config:
+            pgn_game.headers["White"] = self.white_player_config.get('name', 'White Player')
+            if self.white_player_config['type'] == 'cpu' and 'elo' in self.white_player_config:
+                pgn_game.headers["WhiteElo"] = str(self.white_player_config['elo'])
+
+        if self.black_player_config:
+            pgn_game.headers["Black"] = self.black_player_config.get('name', 'Black Player')
+            if self.black_player_config['type'] == 'cpu' and 'elo' in self.black_player_config:
+                pgn_game.headers["BlackElo"] = str(self.black_player_config['elo'])
+        
+        pgn_game.headers["Result"] = self.game.get_board().result()
+
+        # Add moves
+        board_copy = self.game.get_board().copy()
+        board_copy.reset()
+        node = pgn_game
+        for move in self.game.get_board().move_stack:
+            node = node.add_variation(move)
+            board_copy.push(move)
+
+        try:
+            with open(filepath, "w", encoding="utf-8") as f:
+                exporter = chess.pgn.FileExporter(f)
+                pgn_game.accept(exporter)
+            self.log_message(f"Game saved to {Path(filepath).name}")
+        except Exception as e:
+            self.log_message(f"Error saving PGN: {e}")
+            messagebox.showerror("Save Error", f"Could not save PGN file:\n{e}")
