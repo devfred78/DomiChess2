@@ -63,6 +63,10 @@ Themes are located in the `themes` folder, which is split into `boards` and `pie
     - **Black Pieces**: `bK.png`, `bQ.png`, `bR.png`, `bB.png`, `bN.png`, `bP.png`.
 4.  (Optional) Add a `name.txt` file for a custom display name.
 
+## How to Contribute
+
+We welcome contributions from the community! If you'd like to fix a bug, add a feature, or improve the documentation, please read our **[Contributing Guidelines](CONTRIBUTING.md)** to get started.
+
 ## Acknowledgments
 
 - Special thanks to **Erik Madsen** for his incredible work on the [MadChess](https://www.madchess.net/) engine, which is used as the default engine for the "Help" feature in this application.
