@@ -11,6 +11,7 @@ DISPLAY_PIECE_SIZE = 64
 MULTIPLAYER_AVAILABLE = False
 try:
     from multiplayer.client import GameClient
+    from multiplayer.utils import suggest_game_name
     MULTIPLAYER_AVAILABLE = True
 except ImportError:
     pass
@@ -76,7 +77,7 @@ class PlayerPanel(tk.LabelFrame):
         game_frame = tk.Frame(self.remote_frame)
         game_frame.pack(fill="x", pady=(5, 0))
         
-        self.create_game_button = tk.Button(game_frame, text="Create Game", state=tk.DISABLED)
+        self.create_game_button = tk.Button(game_frame, text="Create Game", state=tk.DISABLED, command=self._create_remote_game)
         self.create_game_button.pack(side=tk.LEFT)
         
         self.join_game_button = tk.Button(game_frame, text="Join Game", state=tk.DISABLED)
@@ -124,6 +125,12 @@ class PlayerPanel(tk.LabelFrame):
         self.create_game_button.config(state=tk.NORMAL)
         self.join_game_button.config(state=tk.DISABLED)
         
+        self._list_remote_games()
+
+    def _list_remote_games(self):
+        if not self.selected_server:
+            return
+
         host, port_str = self.selected_server.split(":")
         port = int(port_str)
         
@@ -139,6 +146,30 @@ class PlayerPanel(tk.LabelFrame):
 
         threading.Thread(target=list_games_thread_func, daemon=True).start()
 
+    def _create_remote_game(self):
+        if not self.selected_server:
+            self.main_window.log_message("Error: No server selected.")
+            return
+
+        host, port_str = self.selected_server.split(":")
+        port = int(port_str)
+        
+        self.main_window.log_message(f"Creating game on {self.selected_server}...")
+
+        def create_game_thread_func():
+            try:
+                client = GameClient(host=host, port=port)
+                game_name = suggest_game_name() or "DomiChess Game"
+                client.create_game(name=game_name)
+                self.main_window.after(0, self.main_window.log_message, f"Game '{game_name}' created.")
+                # Refresh the game list
+                self.main_window.after(0, self._list_remote_games)
+            except Exception as e:
+                self.main_window.after(0, self.main_window.log_message, f"Failed to create game: {e}")
+
+        threading.Thread(target=create_game_thread_func, daemon=True).start()
+
+
     def _update_game_list(self, games):
         self.games_listbox.delete(0, tk.END)
         if not games:
@@ -147,9 +178,8 @@ class PlayerPanel(tk.LabelFrame):
         
         self.main_window.log_message(f"Found {len(games)} game(s):")
         for game_id, attributes in games.items():
-            # Using a simple name for now, could be more descriptive
             game_name = attributes.get('name', game_id[:8]) 
-            self.games_listbox.insert(tk.END, game_name)
+            self.games_listbox.insert(tk.END, f"{game_name} ({game_id[:8]})")
             self.main_window.log_message(f"- {game_name}")
 
     def _on_game_selected(self, event=None):
@@ -256,7 +286,10 @@ class PlayerPanel(tk.LabelFrame):
             
             selection = self.games_listbox.curselection()
             if selection:
-                config["game_name"] = self.games_listbox.get(selection[0])
+                # Extract the game_id from the listbox text "Game Name (game_id)"
+                game_text = self.games_listbox.get(selection[0])
+                if "(" in game_text and game_text.endswith(")"):
+                    config["game_id"] = game_text.split('(')[-1][:-1]
 
             return config
 

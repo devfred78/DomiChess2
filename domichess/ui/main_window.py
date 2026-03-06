@@ -28,7 +28,6 @@ else:
     SOURCE_ROOT = APP_ROOT
 
 # This is a temporary and fragile way to import from a parallel directory.
-# A better solution would be a proper monorepo structure or installing the library.
 MULTIPLAYER_PATH = APP_ROOT.parent / "multiplayer"
 if MULTIPLAYER_PATH.exists():
     sys.path.insert(0, str(MULTIPLAYER_PATH))
@@ -59,6 +58,7 @@ class MainWindow(tk.Tk):
         self.game_server = None
         self.remote_game = None
         self.is_remote_game = False
+        self.local_player_color = None
 
         # --- Layout ---
         self.top_theme_bar = tk.LabelFrame(self, text="Themes", labelanchor="nw", padx=10, pady=5)
@@ -68,13 +68,11 @@ class MainWindow(tk.Tk):
         self.left_panel = tk.Frame(self.main_content_frame)
         self.left_panel.pack(side=tk.LEFT, fill="y", padx=(0, 10))
         
-        # --- Current Player Display ---
         self.current_player_frame = tk.LabelFrame(self.left_panel, text="Current Player")
         self.current_player_frame.pack(side=tk.TOP, pady=(0, 10), fill="x")
         self.current_player_image_label = tk.Label(self.current_player_frame, image=self.blank_image)
         self.current_player_image_label.pack(pady=10)
 
-        # --- Player Panels ---
         self.white_display_piece = chess.Piece(random.choice([chess.KNIGHT, chess.QUEEN, chess.ROOK, chess.BISHOP]), chess.WHITE)
         self.black_display_piece = chess.Piece(random.choice([chess.KNIGHT, chess.QUEEN, chess.ROOK, chess.BISHOP]), chess.BLACK)
         
@@ -85,7 +83,6 @@ class MainWindow(tk.Tk):
         self.white_player_panel.set_callback(self.on_player_change)
         self.black_player_panel.set_callback(self.on_player_change)
 
-        # --- Game Controls ---
         controls_frame = tk.Frame(self.left_panel)
         controls_frame.pack(side=tk.TOP, pady=20)
 
@@ -101,19 +98,16 @@ class MainWindow(tk.Tk):
         self.save_pgn_button = tk.Button(controls_frame, text="Save PGN", command=self.prompt_for_pgn_save, background="blue", foreground="white")
         self.save_pgn_button.pack(side=tk.LEFT, padx=2)
 
-        # --- Host Button ---
         if MULTIPLAYER_AVAILABLE:
             self.host_button = tk.Button(self.left_panel, text="Host Multiplayer Game", command=self.host_game)
             self.host_button.pack(side=tk.TOP, pady=(10,0), fill="x")
 
-        # --- Log Area ---
         log_frame = tk.LabelFrame(self.left_panel, text="Game Log")
         log_frame.pack(side=tk.TOP, fill="x", pady=(10, 0), expand=True)
 
         self.log_text = tk.Text(log_frame, height=10, wrap="word", state="disabled", font=("Consolas", 9))
         scrollbar = tk.Scrollbar(log_frame, command=self.log_text.yview)
         self.log_text.config(yscrollcommand=scrollbar.set)
-
         scrollbar.pack(side=tk.RIGHT, fill="y")
         self.log_text.pack(side=tk.LEFT, fill="both", expand=True)
         
@@ -121,7 +115,6 @@ class MainWindow(tk.Tk):
         if not MULTIPLAYER_AVAILABLE:
             self.log_message("Multiplayer library not found.")
 
-        # --- Load Resources ---
         self.engine_paths = self.load_engine_paths()
         self.board_themes = self._load_themes_from("boards", "Board")
         self.piece_themes = self._load_themes_from("pieces", "Piece")
@@ -281,29 +274,28 @@ class MainWindow(tk.Tk):
                 result = self.game.get_game_result()
                 self.log_message(f"Game over: {result}")
                 self.board.show_game_over_message()
-                self.set_ui_state(is_game_running=True) # Keep PGN button active
+                self.set_ui_state(is_game_running=True)
             return
         
         self._update_current_player_display()
         
-        current_player_is_remote = False
-        if self.game.get_board().turn == chess.WHITE and self.white_player_config['type'] == 'remote':
-            current_player_is_remote = True
-        elif self.game.get_board().turn == chess.BLACK and self.black_player_config['type'] == 'remote':
-            current_player_is_remote = True
+        current_turn_color = self.game.get_board().turn
+        
+        is_current_player_remote = (current_turn_color == chess.WHITE and self.white_player_config['type'] == 'remote') or \
+                                   (current_turn_color == chess.BLACK and self.black_player_config['type'] == 'remote')
 
-        if current_player_is_remote:
+        if self.is_remote_game and is_current_player_remote:
             self.board.set_user_input_enabled(False)
             self.fetch_remote_state()
         else:
-            color = "White" if self.game.get_board().turn == chess.WHITE else "Black"
+            color = "White" if current_turn_color == chess.WHITE else "Black"
             if color in self.active_engines:
                 self.board.set_user_input_enabled(False)
                 self.make_engine_move(color)
             else:
                 self.board.set_user_input_enabled(True)
         
-        self.after(1000, self.game_loop) # Slower polling for remote games
+        self.after(1000, self.game_loop)
 
     def fetch_remote_state(self):
         if not self.is_remote_game or not self.remote_game:
@@ -323,9 +315,23 @@ class MainWindow(tk.Tk):
 
     def update_board_from_fen(self, fen):
         try:
-            self.game.get_board().set_fen(fen)
-            self.board.redraw_all()
-            self.log_message("Board updated from remote.")
+            # Find the move that led to this FEN
+            board = self.game.get_board()
+            move = None
+            for m in board.legal_moves:
+                board.push(m)
+                if board.fen() == fen:
+                    move = m
+                    break
+                board.pop()
+
+            if move:
+                self.on_human_move(move.uci())
+            else: # Fallback for unexpected state changes
+                board.set_fen(fen)
+                self.board.redraw_all()
+                self.log_message("Board updated from remote (full sync).")
+
         except Exception as e:
             self.log_message(f"Error setting FEN: {e}")
 
@@ -339,7 +345,7 @@ class MainWindow(tk.Tk):
                 result = engine_info["process"].play(self.game.get_board(), chess.engine.Limit(time=engine_info["time"]))
                 def apply_move():
                     if self.game_running:
-                        self.on_human_move(result.move.uci()) # Use the same logic as human move
+                        self.on_human_move(result.move.uci())
                     setattr(self, f'_engine_move_in_progress_{color}', False)
                 self.after(0, apply_move)
             except Exception as e:
@@ -454,6 +460,7 @@ class MainWindow(tk.Tk):
         self.black_player_config = None
         self.remote_game = None
         self.is_remote_game = False
+        self.local_player_color = None
 
     def start_game(self):
         self.log_message("--- New Game Started ---", clear=True)
@@ -463,24 +470,8 @@ class MainWindow(tk.Tk):
         self.is_remote_game = self.white_player_config['type'] == 'remote' or self.black_player_config['type'] == 'remote'
 
         if self.is_remote_game:
-            try:
-                if self.white_player_config['type'] == 'remote':
-                    client = GameClient(host=self.white_player_config['host'], port=self.white_player_config['port'])
-                    if 'game_name' in self.white_player_config: # Join game
-                        # This is a simplification; we need the game_id, not the name.
-                        # For now, we assume the name is the id.
-                        self.remote_game = RemoteGame(self.white_player_config['game_name'], host=self.white_player_config['host'], port=self.white_player_config['port'])
-                        self.remote_game.add_player(Player(self.black_player_config['name']))
-                    else: # Create game
-                        self.remote_game = client.create_game(name="DomiChess Game")
-                        self.remote_game.add_player(Player(self.white_player_config['name']))
-                
-                # For simplicity, this example assumes one remote and one local player.
-                # A full implementation would need to handle two remote players.
-
-            except Exception as e:
-                self.log_message(f"Failed to start remote game: {e}")
-                return
+            if not self._setup_remote_game():
+                return # Abort if setup fails
 
         def get_player_description(config):
             if config['type'] == 'human':
@@ -510,6 +501,41 @@ class MainWindow(tk.Tk):
         self.board.selected_square = None
         self.board.redraw_all()
         self.after(100, self.game_loop)
+
+    def _setup_remote_game(self):
+        try:
+            # Determine which player is remote and which is local
+            if self.white_player_config['type'] == 'remote':
+                remote_config = self.white_player_config
+                local_config = self.black_player_config
+                self.local_player_color = chess.BLACK
+            else:
+                remote_config = self.black_player_config
+                local_config = self.white_player_config
+                self.local_player_color = chess.WHITE
+
+            client = GameClient(host=remote_config['host'], port=remote_config['port'])
+            
+            if 'game_id' in remote_config: # Joining an existing game
+                self.log_message(f"Joining game {remote_config['game_id']}...")
+                self.remote_game = RemoteGame(remote_config['game_id'], host=remote_config['host'], port=remote_config['port'])
+                self.remote_game.add_player(Player(local_config['name']))
+                self.log_message("Successfully joined game.")
+            else: # Creating a new game
+                self.log_message("Creating new remote game...")
+                self.remote_game = client.create_game(name=f"{local_config['name']}'s Game", turn_based=True, max_players=2)
+                self.remote_game.add_player(Player(local_config['name']))
+                self.log_message(f"Game created with ID: {self.remote_game.game_id}")
+
+            # Set initial state
+            self.remote_game.set_state({'fen': chess.STARTING_FEN})
+            self.remote_game.start()
+            return True
+
+        except Exception as e:
+            self.log_message(f"Error setting up remote game: {e}")
+            messagebox.showerror("Remote Game Error", f"Could not set up the remote game:\n{e}")
+            return False
 
     def _configure_engine(self, config):
         if config["type"] != "cpu": return None
@@ -607,7 +633,6 @@ class MainWindow(tk.Tk):
 
         pgn_game = chess.pgn.Game()
         
-        # Set headers
         pgn_game.headers["Event"] = metadata.get("Event") or "?"
         pgn_game.headers["Site"] = metadata.get("Site") or "?"
         pgn_game.headers["Round"] = metadata.get("Round") or "?"
@@ -625,7 +650,6 @@ class MainWindow(tk.Tk):
         
         pgn_game.headers["Result"] = self.game.get_board().result()
 
-        # Add moves
         board_copy = self.game.get_board().copy()
         board_copy.reset()
         node = pgn_game
