@@ -6,7 +6,7 @@ authors = [
     { name = "devfred78", email = "97401939+devfred78@users.noreply.github.com" },
 ]
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.14"
 classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: Windows",
@@ -17,6 +17,7 @@ dependencies = [
     "Pillow",
     "svglib",
     "reportlab",
+    "multiplayer",
 ]
 
 [project.urls]
@@ -35,3 +36,6 @@ packages = ["domichess"]
 
 [tool.setuptools.dynamic]
 version = {attr = "domichess.__version__"}
+
+[tool.uv.sources]
+multiplayer = { path = "../multiplayer", editable = true }
