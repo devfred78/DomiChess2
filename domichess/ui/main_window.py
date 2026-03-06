@@ -27,6 +27,19 @@ else:
     APP_ROOT = Path(__file__).resolve().parent.parent.parent
     SOURCE_ROOT = APP_ROOT
 
+# This is a temporary and fragile way to import from a parallel directory.
+# A better solution would be a proper monorepo structure or installing the library.
+MULTIPLAYER_PATH = APP_ROOT.parent / "multiplayer"
+if MULTIPLAYER_PATH.exists():
+    sys.path.insert(0, str(MULTIPLAYER_PATH))
+    from multiplayer.client import GameClient, RemoteGame
+    from multiplayer.server import GameServer
+    from multiplayer.game import Player
+    MULTIPLAYER_AVAILABLE = True
+else:
+    MULTIPLAYER_AVAILABLE = False
+
+
 ICONS_DIR = SOURCE_ROOT / "domichess" / "icons"
 THEME_SEARCH_PATHS = [APP_ROOT / "themes", SOURCE_ROOT / "domichess" / "themes"]
 ENGINE_SEARCH_PATHS = [APP_ROOT / "engines", SOURCE_ROOT / "domichess" / "engines"]
@@ -43,6 +56,9 @@ class MainWindow(tk.Tk):
         self.blank_image = tk.PhotoImage(width=64, height=64)
         self.white_player_config = None
         self.black_player_config = None
+        self.game_server = None
+        self.remote_game = None
+        self.is_remote_game = False
 
         # --- Layout ---
         self.top_theme_bar = tk.LabelFrame(self, text="Themes", labelanchor="nw", padx=10, pady=5)
@@ -62,9 +78,9 @@ class MainWindow(tk.Tk):
         self.white_display_piece = chess.Piece(random.choice([chess.KNIGHT, chess.QUEEN, chess.ROOK, chess.BISHOP]), chess.WHITE)
         self.black_display_piece = chess.Piece(random.choice([chess.KNIGHT, chess.QUEEN, chess.ROOK, chess.BISHOP]), chess.BLACK)
         
-        self.white_player_panel = PlayerPanel(self.left_panel, "White", {}, self.white_display_piece)
+        self.white_player_panel = PlayerPanel(self, "White", {}, self.white_display_piece)
         self.white_player_panel.pack(side=tk.TOP, fill="x", pady=5)
-        self.black_player_panel = PlayerPanel(self.left_panel, "Black", {}, self.black_display_piece)
+        self.black_player_panel = PlayerPanel(self, "Black", {}, self.black_display_piece)
         self.black_player_panel.pack(side=tk.TOP, fill="x", pady=5)
         self.white_player_panel.set_callback(self.on_player_change)
         self.black_player_panel.set_callback(self.on_player_change)
@@ -85,9 +101,14 @@ class MainWindow(tk.Tk):
         self.save_pgn_button = tk.Button(controls_frame, text="Save PGN", command=self.prompt_for_pgn_save, background="blue", foreground="white")
         self.save_pgn_button.pack(side=tk.LEFT, padx=2)
 
+        # --- Host Button ---
+        if MULTIPLAYER_AVAILABLE:
+            self.host_button = tk.Button(self.left_panel, text="Host Multiplayer Game", command=self.host_game)
+            self.host_button.pack(side=tk.TOP, pady=(10,0), fill="x")
+
         # --- Log Area ---
         log_frame = tk.LabelFrame(self.left_panel, text="Game Log")
-        log_frame.pack(side=tk.TOP, fill="x", pady=(10, 0))
+        log_frame.pack(side=tk.TOP, fill="x", pady=(10, 0), expand=True)
 
         self.log_text = tk.Text(log_frame, height=10, wrap="word", state="disabled", font=("Consolas", 9))
         scrollbar = tk.Scrollbar(log_frame, command=self.log_text.yview)
@@ -97,6 +118,8 @@ class MainWindow(tk.Tk):
         self.log_text.pack(side=tk.LEFT, fill="both", expand=True)
         
         self.log_message("Welcome to DomiChess2!")
+        if not MULTIPLAYER_AVAILABLE:
+            self.log_message("Multiplayer library not found.")
 
         # --- Load Resources ---
         self.engine_paths = self.load_engine_paths()
@@ -139,6 +162,19 @@ class MainWindow(tk.Tk):
         height = self.winfo_reqheight()
         self.geometry(f"{width}x{height}")
         self.minsize(width, height)
+
+    def host_game(self):
+        if not MULTIPLAYER_AVAILABLE:
+            self.log_message("Cannot host: Multiplayer library not available.")
+            return
+        if self.game_server and self.game_server._server_process.is_alive():
+            self.log_message("Server is already running.")
+            return
+        
+        self.game_server = GameServer()
+        self.game_server.start()
+        self.log_message("Multiplayer server started.")
+        self.host_button.config(state=tk.DISABLED, text="Server is Running")
 
     def log_message(self, message, clear=False):
         self.log_text.config(state="normal")
@@ -199,6 +235,8 @@ class MainWindow(tk.Tk):
         self.save_pgn_button.config(state=tk.NORMAL if is_game_running else tk.DISABLED)
         if hasattr(self, 'help_button'):
             self.help_button.config(state=tk.NORMAL if is_game_running else tk.DISABLED)
+        if hasattr(self, 'host_button'):
+            self.host_button.config(state=tk.DISABLED if self.game_server and self.game_server._server_process.is_alive() else tk.NORMAL)
         
         self._update_current_player_display()
 
@@ -248,14 +286,48 @@ class MainWindow(tk.Tk):
         
         self._update_current_player_display()
         
-        color = "White" if self.game.get_board().turn == chess.WHITE else "Black"
-        if color in self.active_engines:
+        current_player_is_remote = False
+        if self.game.get_board().turn == chess.WHITE and self.white_player_config['type'] == 'remote':
+            current_player_is_remote = True
+        elif self.game.get_board().turn == chess.BLACK and self.black_player_config['type'] == 'remote':
+            current_player_is_remote = True
+
+        if current_player_is_remote:
             self.board.set_user_input_enabled(False)
-            self.make_engine_move(color)
+            self.fetch_remote_state()
         else:
-            self.board.set_user_input_enabled(True)
+            color = "White" if self.game.get_board().turn == chess.WHITE else "Black"
+            if color in self.active_engines:
+                self.board.set_user_input_enabled(False)
+                self.make_engine_move(color)
+            else:
+                self.board.set_user_input_enabled(True)
         
-        self.after(100, self.game_loop)
+        self.after(1000, self.game_loop) # Slower polling for remote games
+
+    def fetch_remote_state(self):
+        if not self.is_remote_game or not self.remote_game:
+            return
+
+        def fetch_thread_func():
+            try:
+                state = self.remote_game.state
+                if state and 'fen' in state:
+                    current_fen = self.game.get_board().fen()
+                    if state['fen'] != current_fen:
+                        self.after(0, self.update_board_from_fen, state['fen'])
+            except Exception as e:
+                self.after(0, self.log_message, f"Error fetching remote state: {e}")
+
+        threading.Thread(target=fetch_thread_func, daemon=True).start()
+
+    def update_board_from_fen(self, fen):
+        try:
+            self.game.get_board().set_fen(fen)
+            self.board.redraw_all()
+            self.log_message("Board updated from remote.")
+        except Exception as e:
+            self.log_message(f"Error setting FEN: {e}")
 
     def make_engine_move(self, color):
         if not self.game_running or color not in self.active_engines: return
@@ -267,20 +339,7 @@ class MainWindow(tk.Tk):
                 result = engine_info["process"].play(self.game.get_board(), chess.engine.Limit(time=engine_info["time"]))
                 def apply_move():
                     if self.game_running:
-                        move = result.move
-                        san = self.game.get_board().san(move)
-                        
-                        move_num_str = ""
-                        if self.game.get_board().turn == chess.WHITE:
-                            move_num_str = f"{self.game.get_board().fullmove_number}."
-                        
-                        self.game.move(move.uci())
-                        
-                        if self.game.get_board().turn == chess.WHITE:
-                             move_num_str = f"{self.game.get_board().fullmove_number - 1}. ..."
-
-                        self.log_message(f"{move_num_str} {san}")
-                        self.board.redraw_all()
+                        self.on_human_move(result.move.uci()) # Use the same logic as human move
                     setattr(self, f'_engine_move_in_progress_{color}', False)
                 self.after(0, apply_move)
             except Exception as e:
@@ -308,8 +367,26 @@ class MainWindow(tk.Tk):
 
                     self.log_message(f"{move_num_str} {san}")
                     self.board.redraw_all()
+
+                    if self.is_remote_game and self.remote_game:
+                        self.send_remote_state()
             except Exception as e:
                 self.log_message(f"Error on move: {e}")
+
+    def send_remote_state(self):
+        if not self.is_remote_game or not self.remote_game:
+            return
+        
+        new_fen = self.game.get_board().fen()
+        
+        def send_thread_func():
+            try:
+                self.remote_game.set_state({'fen': new_fen})
+                self.after(0, self.log_message, "Sent new board state to remote.")
+            except Exception as e:
+                self.after(0, self.log_message, f"Error sending remote state: {e}")
+
+        threading.Thread(target=send_thread_func, daemon=True).start()
 
     def _get_first_non_default(self, themes_dict):
         for name in themes_dict.keys():
@@ -367,16 +444,43 @@ class MainWindow(tk.Tk):
 
     def reset_ui_to_setup(self):
         self.quit_all_engines()
+        if self.game_server:
+            self.game_server.stop()
+            self.game_server = None
         self.game.reset()
         self.board.redraw_all()
         self.set_ui_state(is_game_running=False)
         self.white_player_config = None
         self.black_player_config = None
+        self.remote_game = None
+        self.is_remote_game = False
 
     def start_game(self):
         self.log_message("--- New Game Started ---", clear=True)
         self.white_player_config = self.white_player_panel.get_player_config()
         self.black_player_config = self.black_player_panel.get_player_config()
+
+        self.is_remote_game = self.white_player_config['type'] == 'remote' or self.black_player_config['type'] == 'remote'
+
+        if self.is_remote_game:
+            try:
+                if self.white_player_config['type'] == 'remote':
+                    client = GameClient(host=self.white_player_config['host'], port=self.white_player_config['port'])
+                    if 'game_name' in self.white_player_config: # Join game
+                        # This is a simplification; we need the game_id, not the name.
+                        # For now, we assume the name is the id.
+                        self.remote_game = RemoteGame(self.white_player_config['game_name'], host=self.white_player_config['host'], port=self.white_player_config['port'])
+                        self.remote_game.add_player(Player(self.black_player_config['name']))
+                    else: # Create game
+                        self.remote_game = client.create_game(name="DomiChess Game")
+                        self.remote_game.add_player(Player(self.white_player_config['name']))
+                
+                # For simplicity, this example assumes one remote and one local player.
+                # A full implementation would need to handle two remote players.
+
+            except Exception as e:
+                self.log_message(f"Failed to start remote game: {e}")
+                return
 
         def get_player_description(config):
             if config['type'] == 'human':
@@ -387,6 +491,8 @@ class MainWindow(tk.Tk):
                     desc += f" @ {config['elo']} Elo"
                 desc += ")"
                 return desc
+            elif config['type'] == 'remote':
+                return f"Remote Player ({config.get('host', 'N/A')})"
             return "Unknown"
 
         self.log_message(f"White: {get_player_description(self.white_player_config)}")
@@ -426,7 +532,11 @@ class MainWindow(tk.Tk):
         self.active_engines.clear()
 
     def on_closing(self):
-        if messagebox.askokcancel("Quit", "Do you want to quit?"): self.quit_all_engines(); self.destroy()
+        if messagebox.askokcancel("Quit", "Do you want to quit?"): 
+            self.quit_all_engines()
+            if self.game_server:
+                self.game_server.stop()
+            self.destroy()
     
     def _create_theme_selectors(self, parent, startup_board, startup_pieces):
         board_frame = tk.Frame(parent); board_frame.pack(side=tk.LEFT, padx=20, pady=5)
