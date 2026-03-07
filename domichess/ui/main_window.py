@@ -308,32 +308,39 @@ class MainWindow(tk.Tk):
                 if state and 'fen' in state:
                     current_fen = self.game.get_board().fen()
                     if state['fen'] != current_fen:
-                        self.after(0, self.update_board_from_fen, state['fen'])
+                        self.after(0, self._apply_remote_fen, state['fen'])
             except Exception as e:
                 self.after(0, self.log_message, f"Error fetching remote state: {e}")
 
         threading.Thread(target=fetch_thread_func, daemon=True).start()
 
-    def update_board_from_fen(self, fen):
-        try:
-            board = self.game.get_board()
-            move = None
-            for m in board.legal_moves:
-                board.push(m)
-                if board.fen() == fen:
-                    move = m
-                    break
-                board.pop()
+    def _apply_remote_fen(self, fen):
+        board = self.game.get_board()
+        
+        found_move = None
+        for move in board.legal_moves:
+            temp_board = board.copy()
+            temp_board.push(move)
+            if temp_board.fen() == fen:
+                found_move = move
+                break
 
-            if move:
-                self.on_human_move(move.uci())
+        if found_move:
+            san = board.san(found_move)
+            
+            move_num_str = ""
+            if board.turn == chess.WHITE:
+                move_num_str = f"{board.fullmove_number}."
             else:
-                board.set_fen(fen)
-                self.board.redraw_all()
-                self.log_message("Board updated from remote (full sync).")
+                move_num_str = f"{board.fullmove_number}. ..."
 
-        except Exception as e:
-            self.log_message(f"Error setting FEN: {e}")
+            self.game.move(found_move.uci())
+            self.log_message(f"{move_num_str} {san}")
+        else:
+            self.game.get_board().set_fen(fen)
+            self.log_message("Board updated from remote (full sync).")
+
+        self.board.redraw_all()
 
     def make_engine_move(self, color):
         if not self.game_running or color not in self.active_engines: return
