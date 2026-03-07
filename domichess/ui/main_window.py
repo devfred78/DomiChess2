@@ -202,7 +202,16 @@ class MainWindow(tk.Tk):
             self.log_message("Secure multiplayer server started.")
         else:
             self.log_message("Multiplayer server started.")
-        self.host_button.config(state=tk.DISABLED, text="Server is Running")
+        self.host_button.config(text="Stop Server", command=self.stop_game_server)
+
+    def stop_game_server(self, confirm=True):
+        if self.game_server and self.game_server._server_process.is_alive():
+            do_stop = not confirm or messagebox.askyesno("Stop Server", "Are you sure you want to stop the server? This will disconnect all players.")
+            if do_stop:
+                self.game_server.stop()
+                self.game_server = None
+                self.log_message("Server stopped by user.")
+                self.host_button.config(text="Host Multiplayer Game", command=self.prompt_for_host_options)
 
     def log_message(self, message, clear=False):
         self.log_text.config(state="normal")
@@ -264,7 +273,9 @@ class MainWindow(tk.Tk):
         if hasattr(self, 'help_button'):
             self.help_button.config(state=tk.NORMAL if is_game_running else tk.DISABLED)
         if hasattr(self, 'host_button'):
-            self.host_button.config(state=tk.DISABLED if self.game_server and self.game_server._server_process.is_alive() else tk.NORMAL)
+            is_hosting = self.game_server and self.game_server._server_process.is_alive()
+            if not is_hosting:
+                self.host_button.config(text="Host Multiplayer Game", command=self.prompt_for_host_options)
         
         self._update_current_player_display()
 
@@ -514,8 +525,7 @@ class MainWindow(tk.Tk):
 
         self.quit_all_engines()
         if self.game_server:
-            self.game_server.stop()
-            self.game_server = None
+            self.stop_game_server(confirm=False)
         self.game.reset()
         self.board.redraw_all()
         self.set_ui_state(is_game_running=False)
