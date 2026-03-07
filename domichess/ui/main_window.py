@@ -101,7 +101,7 @@ class MainWindow(tk.Tk):
         self.save_pgn_button.pack(side=tk.LEFT, padx=2)
 
         if MULTIPLAYER_AVAILABLE:
-            self.host_button = tk.Button(self.left_panel, text="Host Multiplayer Game", command=self.host_game)
+            self.host_button = tk.Button(self.left_panel, text="Host Multiplayer Game", command=self.prompt_for_host_options)
             self.host_button.pack(side=tk.TOP, pady=(10,0), fill="x")
 
         log_frame = tk.LabelFrame(self.left_panel, text="Game Log")
@@ -158,7 +158,36 @@ class MainWindow(tk.Tk):
         self.geometry(f"{width}x{height}")
         self.minsize(width, height)
 
-    def host_game(self):
+    def prompt_for_host_options(self):
+        dialog = tk.Toplevel(self)
+        dialog.title("Host Game Options")
+
+        secure_var = tk.BooleanVar()
+        password_var = tk.StringVar()
+
+        def toggle_password_entry():
+            state = tk.NORMAL if secure_var.get() else tk.DISABLED
+            password_entry.config(state=state)
+
+        tk.Checkbutton(dialog, text="Secure with password", variable=secure_var, command=toggle_password_entry).grid(row=0, column=0, columnspan=2, padx=10, pady=5, sticky="w")
+        
+        tk.Label(dialog, text="Password:").grid(row=1, column=0, padx=10, pady=5, sticky="w")
+        password_entry = tk.Entry(dialog, textvariable=password_var, show="*", state=tk.DISABLED)
+        password_entry.grid(row=1, column=1, padx=10, pady=5)
+
+        def on_ok():
+            password = password_var.get() if secure_var.get() else None
+            dialog.destroy()
+            self.host_game(password)
+
+        ok_button = tk.Button(dialog, text="Host", command=on_ok)
+        ok_button.grid(row=2, column=0, columnspan=2, pady=10)
+        
+        dialog.transient(self)
+        dialog.grab_set()
+        self.wait_window(dialog)
+
+    def host_game(self, password=None):
         if not MULTIPLAYER_AVAILABLE:
             self.log_message("Cannot host: Multiplayer library not available.")
             return
@@ -166,9 +195,13 @@ class MainWindow(tk.Tk):
             self.log_message("Server is already running.")
             return
         
-        self.game_server = GameServer()
+        self.game_server = GameServer(password=password)
         self.game_server.start()
-        self.log_message("Multiplayer server started.")
+        
+        if password:
+            self.log_message("Secure multiplayer server started.")
+        else:
+            self.log_message("Multiplayer server started.")
         self.host_button.config(state=tk.DISABLED, text="Server is Running")
 
     def log_message(self, message, clear=False):
@@ -544,11 +577,11 @@ class MainWindow(tk.Tk):
                 local_config = self.white_player_config
                 self.local_player_color = chess.WHITE
 
-            client = GameClient(host=remote_config['host'], port=remote_config['port'])
+            client = GameClient(host=remote_config['host'], port=remote_config['port'], password=remote_config.get('password'))
             
             if 'game_id' in remote_config:
                 self.log_message(f"Joining game {remote_config['game_id']}...")
-                self.remote_game = RemoteGame(remote_config['game_id'], host=remote_config['host'], port=remote_config['port'])
+                self.remote_game = RemoteGame(remote_config['game_id'], host=remote_config['host'], port=remote_config['port'], password=remote_config.get('password'))
                 self.remote_game.add_player(Player(local_config['name']))
                 self.log_message("Successfully joined game.")
             else:

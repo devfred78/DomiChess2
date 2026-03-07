@@ -1,7 +1,7 @@
 # domichess/ui/player_panel.py
 
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, simpledialog
 import chess.engine
 import threading
 import random
@@ -13,6 +13,7 @@ MULTIPLAYER_AVAILABLE = False
 try:
     from multiplayer.client import GameClient
     from multiplayer.utils import suggest_game_name
+    from multiplayer.exceptions import AuthenticationError
     MULTIPLAYER_AVAILABLE = True
 except ImportError:
     pass
@@ -31,6 +32,7 @@ class PlayerPanel(tk.LabelFrame):
         self.piece_photo_image = None
         self.selected_server = None
         self.game_id_map = {} # Maps display name to full game ID
+        self.server_passwords = {} # Caches passwords for servers
 
         # --- Main Layout using .grid() for robustness ---
         self.columnconfigure(2, weight=1) # Make the notebook column expandable
@@ -127,7 +129,7 @@ class PlayerPanel(tk.LabelFrame):
         
         self._list_remote_games()
 
-    def _list_remote_games(self):
+    def _list_remote_games(self, password=None):
         if not self.selected_server:
             return
 
@@ -138,13 +140,23 @@ class PlayerPanel(tk.LabelFrame):
         
         def list_games_thread_func():
             try:
-                client = GameClient(host=host, port=port)
+                client = GameClient(host=host, port=port, password=password)
                 games = client.list_games()
+                self.server_passwords[self.selected_server] = password
                 self.main_window.after(0, self._update_game_list, games)
+            except AuthenticationError:
+                self.main_window.after(0, self._prompt_for_server_password)
             except Exception as e:
                 self.main_window.after(0, self.main_window.log_message, f"Failed to list games: {e}")
 
         threading.Thread(target=list_games_thread_func, daemon=True).start()
+
+    def _prompt_for_server_password(self):
+        password = simpledialog.askstring("Password Required", f"Enter password for {self.selected_server}:", show='*')
+        if password:
+            self._list_remote_games(password=password)
+        else:
+            self.main_window.log_message("Password entry cancelled.")
 
     def _create_remote_game(self):
         if not self.selected_server:
@@ -153,16 +165,19 @@ class PlayerPanel(tk.LabelFrame):
 
         host, port_str = self.selected_server.split(":")
         port = int(port_str)
+        password = self.server_passwords.get(self.selected_server)
         
         self.main_window.log_message(f"Creating game on {self.selected_server}...")
 
         def create_game_thread_func():
             try:
-                client = GameClient(host=host, port=port)
+                client = GameClient(host=host, port=port, password=password)
                 game_name = suggest_game_name() or "DomiChess Game"
                 client.create_game(name=game_name)
                 self.main_window.after(0, self.main_window.log_message, f"Game '{game_name}' created.")
-                self.main_window.after(0, self._list_remote_games)
+                self.main_window.after(0, self._list_remote_games, password)
+            except AuthenticationError:
+                 self.main_window.after(0, self._prompt_for_server_password)
             except Exception as e:
                 self.main_window.after(0, self.main_window.log_message, f"Failed to create game: {e}")
 
@@ -285,6 +300,7 @@ class PlayerPanel(tk.LabelFrame):
                 host, port_str = self.selected_server.split(":")
                 config["host"] = host
                 config["port"] = int(port_str)
+                config["password"] = self.server_passwords.get(self.selected_server)
             
             selection = self.games_listbox.curselection()
             if selection:
