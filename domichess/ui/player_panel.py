@@ -4,6 +4,7 @@ import tkinter as tk
 from tkinter import ttk
 import chess.engine
 import threading
+import random
 
 DISPLAY_PIECE_SIZE = 64
 
@@ -29,6 +30,7 @@ class PlayerPanel(tk.LabelFrame):
         self.display_piece = display_piece
         self.piece_photo_image = None
         self.selected_server = None
+        self.game_id_map = {} # Maps display name to full game ID
 
         # --- Main Layout using .grid() for robustness ---
         self.columnconfigure(2, weight=1) # Make the notebook column expandable
@@ -91,6 +93,7 @@ class PlayerPanel(tk.LabelFrame):
         self.scan_button.config(state=tk.DISABLED)
         self.server_listbox.delete(0, tk.END)
         self.games_listbox.delete(0, tk.END)
+        self.game_id_map.clear()
         self.selected_server = None
         self.main_window.log_message("Scanning for servers...")
 
@@ -122,6 +125,7 @@ class PlayerPanel(tk.LabelFrame):
         
         self.selected_server = self.server_listbox.get(selection[0])
         self.games_listbox.delete(0, tk.END)
+        self.game_id_map.clear()
         self.create_game_button.config(state=tk.NORMAL)
         self.join_game_button.config(state=tk.DISABLED)
         
@@ -162,7 +166,6 @@ class PlayerPanel(tk.LabelFrame):
                 game_name = suggest_game_name() or "DomiChess Game"
                 client.create_game(name=game_name)
                 self.main_window.after(0, self.main_window.log_message, f"Game '{game_name}' created.")
-                # Refresh the game list
                 self.main_window.after(0, self._list_remote_games)
             except Exception as e:
                 self.main_window.after(0, self.main_window.log_message, f"Failed to create game: {e}")
@@ -172,20 +175,26 @@ class PlayerPanel(tk.LabelFrame):
 
     def _update_game_list(self, games):
         self.games_listbox.delete(0, tk.END)
+        self.game_id_map.clear()
         if not games:
             self.main_window.log_message("No active games on this server.")
             return
         
         self.main_window.log_message(f"Found {len(games)} game(s):")
         for game_id, attributes in games.items():
-            game_name = attributes.get('name', game_id[:8]) 
-            self.games_listbox.insert(tk.END, f"{game_name} ({game_id[:8]})")
-            self.main_window.log_message(f"- {game_name}")
+            game_name = attributes.get('name', game_id[:8])
+            display_name = f"{game_name} ({game_id[:8]})"
+            self.games_listbox.insert(tk.END, display_name)
+            self.game_id_map[display_name] = game_id
+            self.main_window.log_message(f"- {display_name}")
 
     def _on_game_selected(self, event=None):
         selection = self.games_listbox.curselection()
         if selection:
             self.join_game_button.config(state=tk.NORMAL)
+            selected_display_name = self.games_listbox.get(selection[0])
+            full_game_id = self.game_id_map.get(selected_display_name)
+            self.main_window.log_message(f"Selected game to join: {selected_display_name} (ID: {full_game_id})")
         else:
             self.join_game_button.config(state=tk.DISABLED)
 
@@ -286,10 +295,8 @@ class PlayerPanel(tk.LabelFrame):
             
             selection = self.games_listbox.curselection()
             if selection:
-                # Extract the game_id from the listbox text "Game Name (game_id)"
-                game_text = self.games_listbox.get(selection[0])
-                if "(" in game_text and game_text.endswith(")"):
-                    config["game_id"] = game_text.split('(')[-1][:-1]
+                display_name = self.games_listbox.get(selection[0])
+                config["game_id"] = self.game_id_map.get(display_name)
 
             return config
 
