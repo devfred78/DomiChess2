@@ -34,7 +34,7 @@ data_files = [
 
 a = Analysis(
     ['domichess/main.py'],
-    pathex=[],
+    pathex=['../multiplayer'],
     binaries=binary_files,
     datas=data_files,
     hiddenimports=[],
@@ -78,4 +78,3 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
 )
-

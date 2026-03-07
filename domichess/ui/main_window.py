@@ -26,16 +26,17 @@ if getattr(sys, 'frozen', False):
 else:
     APP_ROOT = Path(__file__).resolve().parent.parent.parent
     SOURCE_ROOT = APP_ROOT
+    # In dev mode, we need to manually add the parallel directory to the path
+    MULTIPLAYER_PATH = APP_ROOT.parent / "multiplayer"
+    if MULTIPLAYER_PATH.exists():
+        sys.path.insert(0, str(MULTIPLAYER_PATH))
 
-# This is a temporary and fragile way to import from a parallel directory.
-MULTIPLAYER_PATH = APP_ROOT.parent / "multiplayer"
-if MULTIPLAYER_PATH.exists():
-    sys.path.insert(0, str(MULTIPLAYER_PATH))
+try:
     from multiplayer.client import GameClient, RemoteGame
     from multiplayer.server import GameServer
     from multiplayer.game import Player
     MULTIPLAYER_AVAILABLE = True
-else:
+except ImportError:
     MULTIPLAYER_AVAILABLE = False
 
 
@@ -315,7 +316,6 @@ class MainWindow(tk.Tk):
 
     def update_board_from_fen(self, fen):
         try:
-            # Find the move that led to this FEN
             board = self.game.get_board()
             move = None
             for m in board.legal_moves:
@@ -327,7 +327,7 @@ class MainWindow(tk.Tk):
 
             if move:
                 self.on_human_move(move.uci())
-            else: # Fallback for unexpected state changes
+            else:
                 board.set_fen(fen)
                 self.board.redraw_all()
                 self.log_message("Board updated from remote (full sync).")
@@ -471,7 +471,7 @@ class MainWindow(tk.Tk):
 
         if self.is_remote_game:
             if not self._setup_remote_game():
-                return # Abort if setup fails
+                return
 
         def get_player_description(config):
             if config['type'] == 'human':
@@ -504,7 +504,6 @@ class MainWindow(tk.Tk):
 
     def _setup_remote_game(self):
         try:
-            # Determine which player is remote and which is local
             if self.white_player_config['type'] == 'remote':
                 remote_config = self.white_player_config
                 local_config = self.black_player_config
@@ -516,18 +515,17 @@ class MainWindow(tk.Tk):
 
             client = GameClient(host=remote_config['host'], port=remote_config['port'])
             
-            if 'game_id' in remote_config: # Joining an existing game
+            if 'game_id' in remote_config:
                 self.log_message(f"Joining game {remote_config['game_id']}...")
                 self.remote_game = RemoteGame(remote_config['game_id'], host=remote_config['host'], port=remote_config['port'])
                 self.remote_game.add_player(Player(local_config['name']))
                 self.log_message("Successfully joined game.")
-            else: # Creating a new game
+            else:
                 self.log_message("Creating new remote game...")
                 self.remote_game = client.create_game(name=f"{local_config['name']}'s Game", turn_based=True, max_players=2)
                 self.remote_game.add_player(Player(local_config['name']))
                 self.log_message(f"Game created with ID: {self.remote_game.game_id}")
 
-            # Set initial state
             self.remote_game.set_state({'fen': chess.STARTING_FEN})
             self.remote_game.start()
             return True
