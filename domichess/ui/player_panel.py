@@ -82,9 +82,6 @@ class PlayerPanel(tk.LabelFrame):
         self.create_game_button = tk.Button(game_frame, text="Create Game", state=tk.DISABLED, command=self._create_remote_game)
         self.create_game_button.pack(side=tk.LEFT)
         
-        self.join_game_button = tk.Button(game_frame, text="Join Game", state=tk.DISABLED)
-        self.join_game_button.pack(side=tk.LEFT, padx=5)
-        
         self.games_listbox = tk.Listbox(self.remote_frame, height=3)
         self.games_listbox.pack(fill="x", expand=True, pady=(5, 0))
         self.games_listbox.bind('<<ListboxSelect>>', self._on_game_selected)
@@ -127,7 +124,6 @@ class PlayerPanel(tk.LabelFrame):
         self.games_listbox.delete(0, tk.END)
         self.game_id_map.clear()
         self.create_game_button.config(state=tk.NORMAL)
-        self.join_game_button.config(state=tk.DISABLED)
         
         self._list_remote_games()
 
@@ -191,12 +187,9 @@ class PlayerPanel(tk.LabelFrame):
     def _on_game_selected(self, event=None):
         selection = self.games_listbox.curselection()
         if selection:
-            self.join_game_button.config(state=tk.NORMAL)
             selected_display_name = self.games_listbox.get(selection[0])
             full_game_id = self.game_id_map.get(selected_display_name)
             self.main_window.log_message(f"Selected game to join: {selected_display_name} (ID: {full_game_id})")
-        else:
-            self.join_game_button.config(state=tk.DISABLED)
 
     def update_engine_list(self, engine_paths):
         self.engine_paths = engine_paths
