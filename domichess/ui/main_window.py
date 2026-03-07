@@ -51,6 +51,7 @@ class MainWindow(tk.Tk):
         self.game = Game()
         self.active_engines = {}
         self.game_running = False
+        self.is_handling_game_end = False
         self._theme_update_lock = False
         self.current_player_photo_image = None
         self.blank_image = tk.PhotoImage(width=64, height=64)
@@ -270,8 +271,11 @@ class MainWindow(tk.Tk):
         self._theme_update_lock = False
 
     def game_loop(self):
-        if not self.game_running or self.game.is_game_over():
-            if self.game.is_game_over():
+        if not self.game_running:
+            return
+        
+        if self.game.is_game_over():
+            if not self.is_remote_game:
                 result = self.game.get_game_result()
                 self.log_message(f"Game over: {result}")
                 self.board.show_game_over_message()
@@ -280,21 +284,21 @@ class MainWindow(tk.Tk):
         
         self._update_current_player_display()
         
-        current_turn_color = self.game.get_board().turn
-        
-        is_current_player_remote = (current_turn_color == chess.WHITE and self.white_player_config['type'] == 'remote') or \
-                                   (current_turn_color == chess.BLACK and self.black_player_config['type'] == 'remote')
-
-        if self.is_remote_game and is_current_player_remote:
-            self.board.set_user_input_enabled(False)
+        if self.is_remote_game:
             self.fetch_remote_state()
-        else:
+
+        current_turn_color = self.game.get_board().turn
+        is_local_turn = (self.local_player_color is None) or (current_turn_color == self.local_player_color)
+
+        if not self.is_remote_game or is_local_turn:
             color = "White" if current_turn_color == chess.WHITE else "Black"
             if color in self.active_engines:
                 self.board.set_user_input_enabled(False)
                 self.make_engine_move(color)
             else:
                 self.board.set_user_input_enabled(True)
+        else: # Remote game and it's the opponent's turn
+            self.board.set_user_input_enabled(False)
         
         self.after(1000, self.game_loop)
 
@@ -305,14 +309,26 @@ class MainWindow(tk.Tk):
         def fetch_thread_func():
             try:
                 state = self.remote_game.state
-                if state and 'fen' in state:
+                if state['status'] == 'finished':
+                    self.after(0, self.handle_remote_game_end)
+                    return
+
+                if 'custom' in state and 'fen' in state['custom']:
                     current_fen = self.game.get_board().fen()
-                    if state['fen'] != current_fen:
-                        self.after(0, self._apply_remote_fen, state['fen'])
-            except Exception as e:
-                self.after(0, self.log_message, f"Error fetching remote state: {e}")
+                    if state['custom']['fen'] != current_fen:
+                        self.after(0, self._apply_remote_fen, state['custom']['fen'])
+            except Exception:
+                self.after(0, self.handle_remote_game_end)
 
         threading.Thread(target=fetch_thread_func, daemon=True).start()
+
+    def handle_remote_game_end(self):
+        if self.is_handling_game_end:
+            return
+        self.is_handling_game_end = True
+        self.log_message("Opponent has left the game.")
+        messagebox.showinfo("Game Over", "Your opponent has disconnected.")
+        self.reset_ui_to_setup()
 
     def _apply_remote_fen(self, fen):
         board = self.game.get_board()
@@ -456,6 +472,13 @@ class MainWindow(tk.Tk):
             self._set_interactive_widgets_state(child, state)
 
     def reset_ui_to_setup(self):
+        if self.is_remote_game and self.remote_game:
+            try:
+                self.remote_game.stop()
+                self.log_message("Notified server of game termination.")
+            except Exception as e:
+                self.log_message(f"Could not notify server of game end: {e}")
+
         self.quit_all_engines()
         if self.game_server:
             self.game_server.stop()
@@ -468,6 +491,7 @@ class MainWindow(tk.Tk):
         self.remote_game = None
         self.is_remote_game = False
         self.local_player_color = None
+        self.is_handling_game_end = False
 
     def start_game(self):
         self.log_message("--- New Game Started ---", clear=True)

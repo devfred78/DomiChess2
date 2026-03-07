@@ -29,6 +29,7 @@ binary_files = [
 data_files = [
 			('domichess/themes', 'domichess/themes'),
 			('domichess/icons', 'domichess/icons'),
+            ('../multiplayer/multiplayer/data', 'multiplayer/data'),
 			('pyproject.toml', '.')
 			]
 
