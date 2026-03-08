@@ -11,6 +11,7 @@ import random
 import importlib.metadata
 import sys
 import textwrap
+import socket
 from datetime import datetime
 import domichess
 
@@ -201,6 +202,15 @@ class MainWindow(tk.Tk):
         dialog.grab_set()
         self.wait_window(dialog)
 
+    def _test_port_binding(self, host, port):
+        """Tests if a port can be bound to. Returns (True, None) or (False, error_message)."""
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind((host, port))
+            return True, None
+        except Exception as e:
+            return False, str(e)
+
     def host_game(self, password=None, use_tls=False, port=65432):
         if not MULTIPLAYER_AVAILABLE:
             self.log_message("Cannot host: Multiplayer library not available.")
@@ -209,27 +219,59 @@ class MainWindow(tk.Tk):
             self.log_message("Server is already running.")
             return
         
+        # Try to find the local IP to bind to, instead of 0.0.0.0
         try:
-            self.game_server = GameServer(port=port, password=password, use_tls=use_tls)
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(('10.255.255.255', 1))
+            local_ip = s.getsockname()[0]
+            s.close()
+        except Exception:
+            local_ip = '0.0.0.0'
+
+        # Pre-check port availability/permission on local IP
+        success, error_msg = self._test_port_binding(local_ip, port)
+        
+        if not success:
+            # If binding to local_ip fails, ask user if they want to try localhost
+            if messagebox.askyesno("Server Error", 
+                f"Could not start server on {local_ip}:{port} ({error_msg}).\n\n"
+                "Do you want to try starting in 'Local Only' mode (127.0.0.1)?\n"
+                "This will only allow connections from this computer."):
+                
+                # Pre-check localhost
+                success_local, error_msg_local = self._test_port_binding('127.0.0.1', port)
+                if success_local:
+                    try:
+                        self.game_server = GameServer(host='127.0.0.1', port=port, password=password, use_tls=use_tls)
+                        self.game_server.start()
+                        self.log_message(f"Server started in LOCAL ONLY mode on 127.0.0.1:{port}.")
+                        self.host_button.config(text="Stop Server", command=self.stop_game_server)
+                    except Exception as e:
+                        self.log_message(f"Failed to start local server: {e}")
+                        self.game_server = None
+                else:
+                    self.log_message(f"Failed to start local server: {error_msg_local}")
+                    messagebox.showerror("Server Error", f"Even local mode failed: {error_msg_local}")
+            else:
+                self.log_message(f"Failed to start server: {error_msg}")
+            return
+
+        # If pre-check passed, try starting the actual server
+        try:
+            self.game_server = GameServer(host=local_ip, port=port, password=password, use_tls=use_tls)
             self.game_server.start()
             
-            log_msg = f"Multiplayer server started on port {port}."
+            log_msg = f"Multiplayer server started on {local_ip}:{port}."
             if password:
                 log_msg = "Secure " + log_msg
             if use_tls:
                 log_msg += " (TLS enabled)"
             self.log_message(log_msg)
             self.host_button.config(text="Stop Server", command=self.stop_game_server)
-        except (PermissionError, OSError) as e:
-            self.log_message(f"Failed to start server: {e}")
-            messagebox.showerror("Server Error", 
-                f"Could not start the server on port {port}.\n\n"
-                "Possible reasons:\n"
-                "- The port is already in use.\n"
-                "- Windows Firewall is blocking the connection.\n"
-                "- You need administrator privileges.\n\n"
-                "Try changing the port number or checking your firewall settings."
-            )
+            
+        except Exception as e:
+            self.log_message(f"Failed to start server process: {e}")
+            messagebox.showerror("Server Error", f"Failed to start server process:\n{e}")
             self.game_server = None
 
     def stop_game_server(self, confirm=True):
