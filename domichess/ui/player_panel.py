@@ -74,6 +74,9 @@ class PlayerPanel(tk.LabelFrame):
         self.scan_button = tk.Button(server_frame, text="Scan Network", command=self._scan_for_servers)
         self.scan_button.pack(side=tk.LEFT)
         
+        self.use_tls_var = tk.BooleanVar()
+        tk.Checkbutton(server_frame, text="Use TLS", variable=self.use_tls_var).pack(side=tk.RIGHT)
+        
         self.server_listbox = tk.Listbox(self.remote_frame, height=3)
         self.server_listbox.pack(fill="x", expand=True, pady=(0, 5))
         self.server_listbox.bind('<<ListboxSelect>>', self._on_server_selected)
@@ -135,12 +138,13 @@ class PlayerPanel(tk.LabelFrame):
 
         host, port_str = self.selected_server.split(":")
         port = int(port_str)
+        use_tls = self.use_tls_var.get()
         
         self.main_window.log_message(f"Querying games from {self.selected_server}...")
         
         def list_games_thread_func():
             try:
-                client = GameClient(host=host, port=port, password=password)
+                client = GameClient(host=host, port=port, password=password, use_tls=use_tls)
                 games = client.list_games()
                 self.server_passwords[self.selected_server] = password
                 self.main_window.after(0, self._update_game_list, games)
@@ -166,12 +170,13 @@ class PlayerPanel(tk.LabelFrame):
         host, port_str = self.selected_server.split(":")
         port = int(port_str)
         password = self.server_passwords.get(self.selected_server)
+        use_tls = self.use_tls_var.get()
         
         self.main_window.log_message(f"Creating game on {self.selected_server}...")
 
         def create_game_thread_func():
             try:
-                client = GameClient(host=host, port=port, password=password)
+                client = GameClient(host=host, port=port, password=password, use_tls=use_tls)
                 game_name = suggest_game_name() or "DomiChess Game"
                 client.create_game(name=game_name)
                 self.main_window.after(0, self.main_window.log_message, f"Game '{game_name}' created.")
@@ -301,6 +306,7 @@ class PlayerPanel(tk.LabelFrame):
                 config["host"] = host
                 config["port"] = int(port_str)
                 config["password"] = self.server_passwords.get(self.selected_server)
+                config["use_tls"] = self.use_tls_var.get()
             
             selection = self.games_listbox.curselection()
             if selection:

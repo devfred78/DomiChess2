@@ -164,6 +164,8 @@ class MainWindow(tk.Tk):
 
         secure_var = tk.BooleanVar()
         password_var = tk.StringVar()
+        tls_var = tk.BooleanVar()
+        port_var = tk.IntVar(value=65432)
 
         def toggle_password_entry():
             state = tk.NORMAL if secure_var.get() else tk.DISABLED
@@ -175,19 +177,31 @@ class MainWindow(tk.Tk):
         password_entry = tk.Entry(dialog, textvariable=password_var, show="*", state=tk.DISABLED)
         password_entry.grid(row=1, column=1, padx=10, pady=5)
 
+        tk.Checkbutton(dialog, text="Use TLS encryption", variable=tls_var).grid(row=2, column=0, columnspan=2, padx=10, pady=5, sticky="w")
+        
+        tk.Label(dialog, text="Port:").grid(row=3, column=0, padx=10, pady=5, sticky="w")
+        tk.Entry(dialog, textvariable=port_var, width=10).grid(row=3, column=1, padx=10, pady=5, sticky="w")
+
         def on_ok():
             password = password_var.get() if secure_var.get() else None
+            use_tls = tls_var.get()
+            try:
+                port = port_var.get()
+            except tk.TclError:
+                messagebox.showerror("Invalid Port", "Port must be a number.")
+                return
+            
             dialog.destroy()
-            self.host_game(password)
+            self.host_game(password=password, use_tls=use_tls, port=port)
 
         ok_button = tk.Button(dialog, text="Host", command=on_ok)
-        ok_button.grid(row=2, column=0, columnspan=2, pady=10)
+        ok_button.grid(row=4, column=0, columnspan=2, pady=10)
         
         dialog.transient(self)
         dialog.grab_set()
         self.wait_window(dialog)
 
-    def host_game(self, password=None):
+    def host_game(self, password=None, use_tls=False, port=65432):
         if not MULTIPLAYER_AVAILABLE:
             self.log_message("Cannot host: Multiplayer library not available.")
             return
@@ -195,14 +209,28 @@ class MainWindow(tk.Tk):
             self.log_message("Server is already running.")
             return
         
-        self.game_server = GameServer(password=password)
-        self.game_server.start()
-        
-        if password:
-            self.log_message("Secure multiplayer server started.")
-        else:
-            self.log_message("Multiplayer server started.")
-        self.host_button.config(text="Stop Server", command=self.stop_game_server)
+        try:
+            self.game_server = GameServer(port=port, password=password, use_tls=use_tls)
+            self.game_server.start()
+            
+            log_msg = f"Multiplayer server started on port {port}."
+            if password:
+                log_msg = "Secure " + log_msg
+            if use_tls:
+                log_msg += " (TLS enabled)"
+            self.log_message(log_msg)
+            self.host_button.config(text="Stop Server", command=self.stop_game_server)
+        except (PermissionError, OSError) as e:
+            self.log_message(f"Failed to start server: {e}")
+            messagebox.showerror("Server Error", 
+                f"Could not start the server on port {port}.\n\n"
+                "Possible reasons:\n"
+                "- The port is already in use.\n"
+                "- Windows Firewall is blocking the connection.\n"
+                "- You need administrator privileges.\n\n"
+                "Try changing the port number or checking your firewall settings."
+            )
+            self.game_server = None
 
     def stop_game_server(self, confirm=True):
         if self.game_server and self.game_server._server_process.is_alive():
@@ -587,11 +615,11 @@ class MainWindow(tk.Tk):
                 local_config = self.white_player_config
                 self.local_player_color = chess.WHITE
 
-            client = GameClient(host=remote_config['host'], port=remote_config['port'], password=remote_config.get('password'))
+            client = GameClient(host=remote_config['host'], port=remote_config['port'], password=remote_config.get('password'), use_tls=remote_config.get('use_tls', False))
             
             if 'game_id' in remote_config:
                 self.log_message(f"Joining game {remote_config['game_id']}...")
-                self.remote_game = RemoteGame(remote_config['game_id'], host=remote_config['host'], port=remote_config['port'], password=remote_config.get('password'))
+                self.remote_game = RemoteGame(remote_config['game_id'], host=remote_config['host'], port=remote_config['port'], password=remote_config.get('password'), use_tls=remote_config.get('use_tls', False))
                 self.remote_game.add_player(Player(local_config['name']))
                 self.log_message("Successfully joined game.")
             else:
