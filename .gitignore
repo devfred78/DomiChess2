@@ -1,3 +1,47 @@
-/dist/
+# --- SECURITY (CRITICAL) ---
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+.secrets.baseline
+
+# --- PYTHON ---
+__pycache__/
+*.py[cod]
+*$py.class
+.venv
+venv/
+ENV/
+env/
+build/
+dist/
+*.egg-info/
+
+# --- TESTS & QUALITY ---
+.pytest_cache/
+.tox/
+.nox/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# --- DOCKER ---
+.docker/
+# We keep the Dockerfile, but we mostly forget the persistent data
+data/
+db_data/
+
+# --- IDE (VS Code, PyCharm) ---
+.vscode/
 .idea/
-DomiChess2.egg-info/
+*.swp
+*.swo
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+
+# --- PROJECT SPECIFICS --
+resources/
